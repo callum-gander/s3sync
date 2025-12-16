@@ -17,10 +17,14 @@ categories = ["command-line-utilities", "filesystem", "asynchronous", "concurren
 anyhow = { version = "1.0.100" }
 async-trait = "0.1.89"
 async-channel = "2.5.0"
-aws-config = { version = "1.8.11", features = ["behavior-version-latest"] }
+aws-config = { version = "1.8.11", default-features = false, features = ["behavior-version-latest", "rt-tokio", "credentials-process", "sso"] }
 aws-runtime = "1.5.16"
-aws-sdk-s3 = "1.113.0"
+aws-sdk-s3 = { version = "1.113.0", default-features = false, features = ["sigv4a", "rt-tokio"] }
 aws-smithy-runtime-api = "1.9.2"
+aws-smithy-http-client = { version = "1", default-features = false, features = ["rustls-ring"] }
+
+# Explicitly set rustls to use ring only (no aws-lc-rs) for iOS compatibility
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 aws-smithy-types = {  version = "1.3.4"}
 aws-smithy-types-convert = { version = "0.60.10", features = ["convert-chrono"] }
 aws-types = "1.3.10"
@@ -96,6 +100,14 @@ version = ["dep:shadow-rs"]
 
 lua_support = ["dep:mlua"]
 
+# Android-specific dependencies for TLS certificate handling
+# On Android, rustls-native-certs can't access the Java KeyStore,
+# so we use hyper-rustls with bundled webpki-roots instead
+# Note: hyper-rustls 0.24.x is required for compatibility with hyper 0.14 (used by aws-smithy-runtime)
+[target.'cfg(target_os = "android")'.dependencies]
+hyper-rustls = { version = "0.24", default-features = false, features = ["webpki-tokio", "http1", "http2", "tls12"] }
+aws-smithy-runtime = { version = "1", features = ["connector-hyper-0-14-x"] }
+
 [profile.release]
 debug = 1
 panic = "unwind"  # For tempfile::NamedTempFile
@@ -109,3 +121,4 @@ inherits = "release"
 debug = 0
 panic = "abort"
 opt-level = "z"
+

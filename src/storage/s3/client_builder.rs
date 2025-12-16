@@ -4,6 +4,13 @@ use aws_config::{BehaviorVersion, ConfigLoader};
 use aws_runtime::env_config::file::{EnvConfigFileKind, EnvConfigFiles};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Builder;
+// Non-Android platforms use aws-smithy-http-client directly
+#[cfg(not(target_os = "android"))]
+use aws_smithy_http_client::{tls, Builder as HttpClientBuilder};
+
+// Android uses hyper-rustls with bundled webpki-roots
+#[cfg(target_os = "android")]
+use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use std::time::Duration;
 
 use crate::config::ClientConfig;
@@ -27,11 +34,33 @@ impl ClientConfig {
     }
 
     async fn load_sdk_config(&self) -> SdkConfig {
+        // Android: Use hyper-rustls with bundled webpki-roots
+        // Native certs don't work because Rust can't access Android's Java KeyStore
+        #[cfg(target_os = "android")]
+        let http_client = {
+            let tls_connector = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_webpki_roots()  // Bundles Mozilla's ~150 root CA certs
+                .https_only()
+                .enable_http1()
+                .enable_http2()
+                .build();
+            HyperClientBuilder::new().build(tls_connector)
+        };
+
+        // Non-Android platforms: Use native OS certificate store
+        // This works on macOS, Linux, Windows, and iOS
+        #[cfg(not(target_os = "android"))]
+        let http_client = HttpClientBuilder::new()
+            .tls_provider(tls::Provider::Rustls(tls::rustls_provider::CryptoMode::Ring))
+            .build_https();
+
         let config_loader = if self.disable_stalled_stream_protection {
             aws_config::defaults(BehaviorVersion::latest())
+                .http_client(http_client)
                 .stalled_stream_protection(StalledStreamProtectionConfig::disabled())
         } else {
             aws_config::defaults(BehaviorVersion::latest())
+                .http_client(http_client)
                 .stalled_stream_protection(StalledStreamProtectionConfig::enabled().build())
         };
         let mut config_loader = self
